@@ -1,4 +1,6 @@
-module GifGame exposing (Model, InternalMsg, init, Translator, translator, view, update)
+module GifGame exposing (update, view, init, Model, OutMsg(..), Msg)
+
+-- (Model, InternalMsg, init, Translator, translator, view, update)
 
 import Html exposing (Html, div, text, p, button, input, br, img)
 import Html.App exposing (program)
@@ -19,7 +21,7 @@ type alias Model =
     }
 
 
-type InternalMsg
+type Msg
     = TextChanged String
     | MakeGuess
     | GifError Http.Error
@@ -32,36 +34,33 @@ type OutMsg
     | PlayerLoss
 
 
-type Msg
-    = ForSelf InternalMsg
-    | ForParent OutMsg
+
+{-
+      type alias TranslationDictionary parentMsg =
+          { onInternalMessage : InternalMsg -> parentMsg
+          , onPlayerWin : Int -> parentMsg
+          , onPlayerLose : parentMsg
+          }
 
 
-type alias TranslationDictionary parentMsg =
-    { onInternalMessage : InternalMsg -> parentMsg
-    , onPlayerWin : Int -> parentMsg
-    , onPlayerLose : parentMsg
-    }
+   type alias Translator parentMsg =
+       Msg -> parentMsg
 
 
-type alias Translator parentMsg =
-    Msg -> parentMsg
+   translator : TranslationDictionary parentMsg -> Translator parentMsg
+   translator { onInternalMessage, onPlayerWin, onPlayerLose } msg =
+       case msg of
+           ForSelf internal ->
+               onInternalMessage internal
+
+           ForParent (PlayerWin score) ->
+               onPlayerWin score
+
+           ForParent PlayerLoss ->
+               onPlayerLose
 
 
-translator : TranslationDictionary parentMsg -> Translator parentMsg
-translator { onInternalMessage, onPlayerWin, onPlayerLose } msg =
-    case msg of
-        ForSelf internal ->
-            onInternalMessage internal
-
-        ForParent (PlayerWin score) ->
-            onPlayerWin score
-
-        ForParent PlayerLoss ->
-            onPlayerLose
-
-
-
+-}
 -- INIT
 
 
@@ -85,8 +84,8 @@ view model =
     div [ style [ ( "display", "block" ), ( "padding", "20px" ) ] ]
         [ img [ src model.gifUrl ] []
         , br [] []
-        , input [ onInput (ForSelf << TextChanged) ] []
-        , button [ onClick (ForSelf MakeGuess) ] [ text "Guess!" ]
+        , input [ onInput (TextChanged) ] []
+        , button [ onClick (MakeGuess) ] [ text "Guess!" ]
         , p [] [ text ("Guesses left: " ++ toString model.guessesLeft) ]
         ]
 
@@ -95,20 +94,20 @@ view model =
 -- UPDATE
 
 
-update : InternalMsg -> Model -> ( Model, Cmd Msg )
+update : Msg -> Model -> ( Model, Cmd Msg, Maybe OutMsg )
 update msg model =
     case msg of
         TextChanged newText ->
-            { model | currentGuess = newText } ! []
+            ( { model | currentGuess = newText }, Cmd.none, Nothing )
 
         GifError _ ->
-            ( model, getRandomGif model.currentTopic )
+            ( model, getRandomGif model.currentTopic, Nothing )
 
         NewTopic topic ->
-            { model | currentTopic = topic } ! [ getRandomGif topic ]
+            ( { model | currentTopic = topic }, getRandomGif topic, Nothing )
 
         NewGif gifUrl ->
-            { model | gifUrl = gifUrl } ! []
+            ( { model | gifUrl = gifUrl }, Cmd.none, Nothing )
 
         MakeGuess ->
             let
@@ -116,11 +115,11 @@ update msg model =
                     { initialModel | currentGuess = model.currentGuess }
             in
                 if model.currentGuess == model.currentTopic then
-                    newGame ! [ getRandomTopic, generateParentMsg (PlayerWin model.guessesLeft) ]
+                    ( newGame, getRandomTopic, Just <| PlayerWin model.guessesLeft )
                 else if model.guessesLeft == 1 then
-                    newGame ! [ getRandomTopic, generateParentMsg PlayerLoss ]
+                    ( newGame, getRandomTopic, Just PlayerLoss )
                 else
-                    { model | guessesLeft = model.guessesLeft - 1 } ! []
+                    ( { model | guessesLeft = model.guessesLeft - 1 }, Cmd.none, Nothing )
 
 
 never : Never -> a
@@ -128,9 +127,13 @@ never n =
     never n
 
 
-generateParentMsg : OutMsg -> Cmd Msg
-generateParentMsg outMsg =
-    Task.perform never ForParent (Task.succeed outMsg)
+
+{-
+   generateParentMsg : OutMsg -> Cmd Msg
+   generateParentMsg outMsg =
+       Task.perform never ForParent (Task.succeed outMsg)
+
+-}
 
 
 getRandomTopic : Cmd Msg
@@ -146,7 +149,7 @@ getRandomTopic =
         randomTopicGenerator =
             choices topicGenerators
     in
-        Random.generate (ForSelf << NewTopic) randomTopicGenerator
+        Random.generate (NewTopic) randomTopicGenerator
 
 
 getRandomGif : String -> Cmd Msg
@@ -159,4 +162,4 @@ getRandomGif topic =
         url =
             "http://api.giphy.com/v1/gifs/random?api_key=dc6zaTOxFJmzC&tag=" ++ topic
     in
-        Cmd.map ForSelf <| Task.perform GifError NewGif (Http.get decodeGifUrl url)
+        Task.perform GifError NewGif (Http.get decodeGifUrl url)
